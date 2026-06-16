@@ -1,0 +1,29 @@
+# Dataset e Tensori
+*.zip
+/dataset/
+/features/
+features_*/
+/inputs/
+/outputs/
+
+# Modelli e Checkpoint
+*.pth
+*.pt
+/models/
+
+# Ambienti e Cache
+.venv/
+venv*/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Telemetria HPC
+/logs/
+*.out
+*.err
+*.log
+
+# File temporanei di sistema/editor
+.vscode/
+.DS_Store
