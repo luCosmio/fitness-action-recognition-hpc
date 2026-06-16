@@ -9,10 +9,10 @@
 #SBATCH --time=00:30:00            # Walltime (Max: 1-00:00:00 su gpuSlim)
 
 # ==========================================
-# 0. CONFIGURAZIONE CENTRALE (SSOT)
+# 0. PIPELINE CONFIGURATION
 # ==========================================
-# --- Parametri Pipeline ---
-TASK_ID="diagnostics"   # Opzioni: diagnostics, extract, train, inference, all
+# --- Pipeline Hyperparameters ---
+TASK_ID="diagnostics"   # Options: diagnostics, extract, train, inference, all
 FEATURE_TAG="seq_30_skip_2_stride_dyn"
 MODEL_TAG="bilstm_v2"
 BATCH_SIZE=64
@@ -24,28 +24,28 @@ VENV_NAME=".venv"
 DATASET_NAME="dataset.zip"
 PYTHON_SCRIPT="pipeline.py"
 
-# Costrutti Derivati (Non modificare)
+# --- Derived Variables (no edit) ---
 FEATURE_DIR_NAME="features_${FEATURE_TAG}"
 FEATURE_ZIP_NAME="${FEATURE_DIR_NAME}.zip"
 HOME_PROJ_DIR="/hpc/home/$USER/projects/$PROJECT_NAME"
 export SCRATCH_WORKSPACE="/tmp/$USER/job_$SLURM_JOB_ID"
 mkdir -p "$HOME_PROJ_DIR/logs"
 
-# --- Funzione di Logging Bash ---
+# --- Bash Logging Function ---
 hpc_log() {
     echo "[$(date +'%H:%M:%S')] [HPC_ORCHESTRATOR] $1"
 }
 
 # ==========================================
-# 1. SETUP AMBIENTE E VARIABILI HPC
+# 1. ENVIRONMENT SETUP & SIGNAL HANDLING
 # ==========================================
-# Cattura il SIGTERM inviato da SLURM durante il GraceTime (15 min)
+# Catch SIGTERM sent by SLURM on graceTime (15 minutes)
 trap 'hpc_log "RICEVUTO SIGTERM (Fine Tempo o Preemption). Avvio salvataggio di emergenza!"; emergency_sync; exit 143' SIGTERM
 
 module purge
 module load cuda/12.2
 
-# Inizializzazione Virtual Environment
+# Initialize Virtual Environment
 source "$HOME_PROJ_DIR/$VENV_NAME/bin/activate"
 
 hpc_log "=== STAGE 1: RESOURCE ALLOCATION ==="
@@ -55,28 +55,28 @@ hpc_log "Remote Debug Path: /scratchnet/$SLURMD_NODENAME/$USER/job_$SLURM_JOB_ID
 
 export PYTHONUNBUFFERED=1
 
-# Creazione dell'albero di directory volatile nello Scratch locale
+# Creating directory structure on local node (Scratch)
 mkdir -p "$SCRATCH_WORKSPACE/dataset"
 mkdir -p "$SCRATCH_WORKSPACE/models"
 mkdir -p "$SCRATCH_WORKSPACE/inputs"
 mkdir -p "$SCRATCH_WORKSPACE/outputs"
 
-# Funzione di Sincronizzazione (Normale & Emergenza)
+# Syncing function: Scratch -> Home
 sync_to_home() {
     hpc_log "Artifacts sync (Scratch -> Home)..."
 
-    # Raccoglie i modelli salvati
+    # Export trained model weights
     mkdir -p "$HOME_PROJ_DIR/models"
     cp "$SCRATCH_WORKSPACE/models/"*.pth "$HOME_PROJ_DIR/models/" 2>/dev/null || true
 
-    # Raccoglie output (video, CSV, plot, log)
+    # Export outputs (video, CSV, plot, log)
     mkdir -p "$HOME_PROJ_DIR/outputs/run_${SLURM_JOB_ID}_${TASK_ID}"
     cp -r "$SCRATCH_WORKSPACE/outputs/"* "$HOME_PROJ_DIR/outputs/run_${SLURM_JOB_ID}_${TASK_ID}/" 2>/dev/null || true
 
-    # Comprime e salva le feature estratte per futuri addestramenti
+    # Export extracted features (zipped)
     hpc_log "Artifacts sync: zipping extracted features..."
     cd "$SCRATCH_WORKSPACE" || exit
-    # Non fa fallire lo script se la directory non esiste
+    # If dir does not exists, skip zipping
     if [ -d "$FEATURE_DIR_NAME" ]; then
         zip -rq "$HOME_PROJ_DIR/features/$FEATURE_ZIP_NAME" "$FEATURE_DIR_NAME/"
     fi
@@ -84,7 +84,7 @@ sync_to_home() {
 
 emergency_sync() {
     hpc_log "!!! EMERGENCY SYNC !!!"
-    # Uccidiamo brutalmente i processi python per liberare l'I/O e impedire di scrivere log corrotti
+    # Kill any running Python processes to free up resources for sync
     pkill -TERM -P $$ python
     sleep 2
     sync_to_home
@@ -106,17 +106,17 @@ else
     hpc_log "WARNING: $DATASET_NAME not found in $HOME_PROJ_DIR. Feature extraction will fail."
 fi
 
-# Copia file per workflow di Inferenza
+# Copy files needed for inference (e.g., videos, CSVs, etc.) to the scratch workspace
 cp -r "$HOME_PROJ_DIR/inputs/"* "$SCRATCH_WORKSPACE/inputs/" 2>/dev/null || true
 
-# Se abbiamo feature zip pre-calcolate e stiamo facendo solo training, scompattiamole.
+# If pre-extracted features exist, copy them to scratch (unzipped) for faster access during inference/training
 if [ -f "$HOME_PROJ_DIR/$FEATURE_ZIP_NAME" ]; then
     hpc_log "Staging I/O: Unzipping pre-calculated features ($FEATURE_ZIP_NAME)..."
     unzip -q "$HOME_PROJ_DIR/features/$FEATURE_ZIP_NAME" -d "$SCRATCH_WORKSPACE/"
 fi
 
 # ==========================================
-# 3. ESECUZIONE PYTHON SUL NODO GPU
+# 3. PYTHON EXECUTION ON GPU
 # ==========================================
 hpc_log "=== STAGE 3: PYTHON EXECUTION ==="
 hpc_log "Starting task: $TASK_ID..."
@@ -139,12 +139,11 @@ else
 fi
 
 # ==========================================
-# 4. POST-COMPUTE I/O & PULIZIA
+# 4. POST-COMPUTE I/O & CLEANUP
 # ==========================================
 hpc_log "=== STAGE 4: POST-COMPUTE & TEARDOWN ==="
 sync_to_home
 
-# Pulizia proattiva dell'area locale del nodo
 hpc_log "Cleaning Scratch Area ($SCRATCH_WORKSPACE)..."
 rm -rf "$SCRATCH_WORKSPACE"
 hpc_log "Job Completed."
