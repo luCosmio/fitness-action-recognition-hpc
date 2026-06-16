@@ -52,38 +52,34 @@ def set_deterministic_environment(seed: int = 42) -> None:
 
 
 class Config:
-    # --- PIPELINE SWITCHBOARD ---
-    RUN_DIAGNOSTICS = False  # Testing cell
-    RUN_TASK_1_FETCH = False  # Sync Home -> Scratch
-    RUN_TASK_2_EXTRACT = False  # Extracts features (R-CNN)
-    RUN_TASK_3_TRAIN = False  # Training model (BiLSTM)
-    RUN_TASK_4_INFERENCE = False  # Test model on Input Videos
+    # --- DYNAMIC INJECTIONS (Managed by CLI args via job.sh) ---
+    FEATURE_TAG = "default_tag"
+    MODEL_TAG = "default_model"
+    BATCH_SIZE = 16
+    LSTM_BATCH_SIZE = 16
 
-    # --- MANUALLY TARGETED VERSIONS ---
-    # Change these strings to couple extracted features and model versioning
-    FEATURE_TAG = "seq_30_skip_2_stride_dyn"  # Targets: "seq_30_skip_2_stride_10", "seq_30_skip_2_stride_dyn"
-    MODEL_TAG = "bilstm_v2"  # Targets: "bilstm_v1", "bilstm_v2"
-
-    # --- I/O & CHECKPOINTING ---
-    SYNC_EVERY = 50
-
-    # --- HPC PATHS STRATEGY (Slurm Environment Variables) ---
+    # --- HPC PATHS STRATEGY ---
     WORKSPACE_DIR = os.getenv("SCRATCH_WORKSPACE", "/tmp/project_work_cv")
-
-    # Volatile Compute Storage (Assumed to be pre-staged)
     DATASET_DIR = os.path.join(WORKSPACE_DIR, "dataset")
-    FEATURES_DIR = os.path.join(WORKSPACE_DIR, f"features_{FEATURE_TAG}")
     MODELS_DIR = os.path.join(WORKSPACE_DIR, "models")
     OUTPUT_DIR = os.path.join(WORKSPACE_DIR, "outputs")
     INPUT_DIR = os.path.join(WORKSPACE_DIR, "inputs")
 
-    # --- DATA PATHS ---
-    WEIGHTS_PATH = os.path.join(MODELS_DIR, f"{MODEL_TAG}.pth")
+    # --- STATIC DATA PATHS ---
     OFFLINE_RCNN_WEIGHTS = os.path.join(
         MODELS_DIR, "keypointrcnn_resnet50_fpn_coco-fc266e95.pth"
     )
     REAL_DIR = os.path.join(DATASET_DIR, "final_kaggle_with_additional_video")
     SYNTH_DIR = os.path.join(DATASET_DIR, "synthetic_dataset", "synthetic_dataset")
+
+    # --- DYNAMIC PATHS (Dependent on FEATURE_TAG & MODEL_TAG) ---
+    @classmethod
+    def get_features_dir(cls):
+        return os.path.join(cls.WORKSPACE_DIR, f"features_{cls.FEATURE_TAG}")
+
+    @classmethod
+    def get_weights_path(cls):
+        return os.path.join(cls.MODELS_DIR, f"{cls.MODEL_TAG}.pth")
 
     # --- TASK HYPERPARAMETERS & PIPELINE ---
     TARGET_CLASSES = {
@@ -170,7 +166,7 @@ class Config:
         dirs_to_create = [
             cls.WORKSPACE_DIR,
             cls.DATASET_DIR,
-            cls.FEATURES_DIR,
+            cls.get_features_dir(),
             cls.MODELS_DIR,
             cls.OUTPUT_DIR,
             cls.INPUT_DIR,
@@ -485,11 +481,7 @@ class PoseEstimator:
         Returns keypoints, scores, boxes, and highest detection confidence.
         """
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        tensor = (
-            self.transform(torch.from_numpy(frame_rgb).permute(2, 0, 1))
-            .unsqueeze(0)
-            .to(self.device)
-        )
+        tensor = self.transform(frame_rgb).unsqueeze(0).to(self.device)
 
         predictions = self.model(tensor)
 
@@ -517,15 +509,9 @@ class PoseEstimator:
         if not frame_batch:
             return []
         tensors = torch.stack(
-            [
-                self.transform(
-                    torch.from_numpy(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)).permute(
-                        2, 0, 1
-                    )
-                )
-                for f in frame_batch
-            ]
+            [self.transform(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frame_batch]  # type: ignore
         ).to(self.device)
+
         predictions = self.model(tensors)
 
         results = []
@@ -1222,7 +1208,7 @@ class TestSetEvaluator:
             video_id = filename.split("_seq")[0]
 
             if video_id not in video_groups:
-                tensor_data, class_idx = torch.load(filepath)
+                tensor_data, class_idx = torch.load(filepath, weights_only=True)
 
                 video_groups[video_id] = {
                     "true_class": class_idx,
@@ -1230,7 +1216,7 @@ class TestSetEvaluator:
                 }
             else:
                 # Load tensor from sequence
-                tensor_data, _ = torch.load(filepath)
+                tensor_data, _ = torch.load(filepath, weights_only=True)
                 video_groups[video_id]["sequences"].append(tensor_data)
 
         return video_groups
@@ -1542,7 +1528,7 @@ class DiagnosticsRunner:
                 pass
 
         class MockConfig:
-            TARGET_CLASSES = ["squat", "pushup", "curl", "press"]
+            TARGET_CLASSES = {"squat": 0, "pushup": 1, "curl": 2, "press": 3}
 
         with tempfile.TemporaryDirectory() as tmpdir:
             for i in range(3):
@@ -1581,7 +1567,6 @@ class DiagnosticsRunner:
 class FeatureExtractor:
     """
     Extracts skeletal features from raw videos and saves them as PyTorch tensors.
-    Implements Hybrid Batch Sync (Local processing -> Drive backup).
     """
 
     def __init__(self, config, pose_estimator):
@@ -1893,8 +1878,10 @@ class ModelTrainer:
             y_true_bin, best_val_probs, self.config.CLASSES_UI
         )
 
-        logger.info(f"Serializing best model weights to {self.config.WEIGHTS_PATH}...")
-        torch.save(self.model.state_dict(), self.config.WEIGHTS_PATH)
+        logger.info(
+            f"Serializing best model weights to {self.config.get_weights_path()}..."
+        )
+        torch.save(self.model.state_dict(), self.config.get_weights_path())
         if hasattr(self.model, "weights_loaded"):
             setattr(self.model, "weights_loaded", True)
 
@@ -2287,19 +2274,19 @@ def main():
         # Ensure directories are populated by Slurm before this step
         extractor.extract_from_directory(
             input_dir=Config.REAL_DIR,
-            output_dir=Config.FEATURES_DIR,
+            output_dir=Config.get_features_dir(),
             class_mapping=Config.TARGET_CLASSES,
         )
         extractor.extract_from_directory(
             input_dir=Config.SYNTH_DIR,
-            output_dir=Config.FEATURES_DIR,
+            output_dir=Config.get_features_dir(),
             class_mapping=Config.TARGET_CLASSES,
         )
 
     if args.task in ["train", "all"]:
         logger.info("=== STARTING WORKFLOW: MODEL TRAINING ===")
         train_loader, val_loader = DataCoordinator.get_loaders(
-            features_dir=Config.FEATURES_DIR, batch_size=Config.LSTM_BATCH_SIZE
+            features_dir=Config.get_features_dir(), batch_size=Config.LSTM_BATCH_SIZE
         )
         if train_loader is None or val_loader is None:
             logger.error("Missing features. Run --task extract first.")
@@ -2320,7 +2307,7 @@ def main():
         logger.info("=== STARTING WORKFLOW: PRODUCTION INFERENCE ===")
         model = FitnessClassifier(Config())
         model.load_weights(
-            Config.WEIGHTS_PATH, torch.device(Config.DEVICE), strict_match=True
+            Config.get_weights_path(), torch.device(Config.DEVICE), strict_match=True
         )
 
         estimator = PoseEstimator(Config())

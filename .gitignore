@@ -27,3 +27,4 @@ __pycache__/
 # File temporanei di sistema/editor
 .vscode/
 .DS_Store
+pipeline_cv.txt

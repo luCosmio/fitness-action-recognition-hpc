@@ -4,9 +4,9 @@
 #SBATCH --partition=gpuResB
 #SBATCH --qos=gpuResB_qos
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=8          # Richiede 8 CPU
-#SBATCH --mem=64G                  # RAM di sistema
-#SBATCH --time=00:30:00            # Walltime (Max: 1-00:00:00 su gpuSlim)
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=00:30:00   # Walltime (Max: 1-00:00:00 su gpuSlim)
 
 # ==========================================
 # 0. PIPELINE CONFIGURATION
@@ -14,7 +14,7 @@
 # --- Pipeline Hyperparameters ---
 TASK_ID="diagnostics"   # Options: diagnostics, extract, train, inference, all
 FEATURE_TAG="seq_30_skip_2_stride_dyn"
-MODEL_TAG="bilstm_v2"
+MODEL_TAG="bilstm_v1"
 BATCH_SIZE=64
 LSTM_BATCH_SIZE=64
 
@@ -74,11 +74,12 @@ sync_to_home() {
     cp -r "$SCRATCH_WORKSPACE/outputs/"* "$HOME_PROJ_DIR/outputs/run_${SLURM_JOB_ID}_${TASK_ID}/" 2>/dev/null || true
 
     # Export extracted features (zipped)
-    hpc_log "Artifacts sync: zipping extracted features..."
-    cd "$SCRATCH_WORKSPACE" || exit
-    # If dir does not exists, skip zipping
-    if [ -d "$FEATURE_DIR_NAME" ]; then
-        zip -rq "$HOME_PROJ_DIR/features/$FEATURE_ZIP_NAME" "$FEATURE_DIR_NAME/"
+    if [[ "$TASK_ID" == "extract" || "$TASK_ID" == "all" ]]; then
+        hpc_log "Archiviazione Tensori PyTorch..."
+        cd "$SCRATCH_WORKSPACE" || exit
+        if [ -d "$FEATURE_DIR_NAME" ]; then
+            zip -rq "$HOME_PROJ_DIR/features/$FEATURE_ZIP_NAME" "$FEATURE_DIR_NAME/"
+        fi
     fi
 }
 
@@ -110,7 +111,7 @@ fi
 cp -r "$HOME_PROJ_DIR/inputs/"* "$SCRATCH_WORKSPACE/inputs/" 2>/dev/null || true
 
 # If pre-extracted features exist, copy them to scratch (unzipped) for faster access during inference/training
-if [ -f "$HOME_PROJ_DIR/$FEATURE_ZIP_NAME" ]; then
+if [ -f "$HOME_PROJ_DIR/features/$FEATURE_ZIP_NAME" ]; then
     hpc_log "Staging I/O: Unzipping pre-calculated features ($FEATURE_ZIP_NAME)..."
     unzip -q "$HOME_PROJ_DIR/features/$FEATURE_ZIP_NAME" -d "$SCRATCH_WORKSPACE/"
 fi
