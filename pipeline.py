@@ -266,7 +266,7 @@ class PoseUtils:
     def extract_key_angles(
         keypoints: np.ndarray, kalman_filters: list, return_raw: bool = False
     ):
-        """Extracts 8 relative angles, 1 torso inclination, and 1 spatial bbox ratio."""
+        """Extracts 8 relative joint angles (View-Invariant) for kinematic analysis."""
         filtered = {}
         raw = {}
         # filters and updates keypoints in Config.COCO
@@ -286,12 +286,8 @@ class PoseUtils:
                 filtered[name] = np.array(
                     [kf_x.estimated_measurement, kf_y.estimated_measurement]
                 )
-                if return_raw:
-                    raw[name] = filtered[name]
 
         def _calc_angles(d: dict) -> list:
-            torso_r = PoseUtils.calculate_absolute_y_angle(d["R_SHOULDER"], d["R_HIP"])
-            torso_l = PoseUtils.calculate_absolute_y_angle(d["L_SHOULDER"], d["L_HIP"])
 
             return [
                 PoseUtils.calculate_angle(
@@ -318,8 +314,6 @@ class PoseUtils:
                 PoseUtils.calculate_angle(
                     d["L_HIP"], d["L_KNEE"], d["L_ANKLE"]
                 ),  # 7: Ginocchio Sx
-                (torso_r + torso_l) / 2.0,  # 8: Inclinazione torso
-                PoseUtils.calculate_bbox_ratio(d),  # 9: BBox Aspect Ratio
             ]
 
         angles_filtered = _calc_angles(filtered)
@@ -375,7 +369,7 @@ class FitnessSequenceDataset(Dataset):
         return len(self.files)
 
     def __getitem__(self, idx: int):
-        return torch.load(self.files[idx])
+        return torch.load(self.files[idx], weights_only=True)
 
 
 class DataCoordinator:
@@ -1674,6 +1668,9 @@ class FeatureExtractor:
                         )
 
                         if empty_frames <= max_allowed_empty:
+                            if seq_count >= max_seq_allowed:
+                                break
+
                             tensor_data = torch.tensor(
                                 sequence_buffer, dtype=torch.float32
                             )

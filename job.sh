@@ -1,22 +1,22 @@
 #!/bin/bash
 #SBATCH --job-name=cv_pipeline
 #SBATCH --output=/hpc/home/%u/projects/project_work_cv/logs/%j_%x.log
-#SBATCH --partition=gpuResB
+#SBATCH --partition=gpuResB     # gpuSlim, gpuResB
 #SBATCH --qos=gpuResB_qos
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:1            # gpu:1g.22gb:1, gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=00:30:00   # Walltime (Max: 1-00:00:00 su gpuSlim)
+#SBATCH --time=01:00:00   # Walltime (Max: 1-00:00:00 su gpuSlim)
 
 # ==========================================
 # 0. PIPELINE CONFIGURATION
 # ==========================================
 # --- Pipeline Hyperparameters ---
-TASK_ID="diagnostics"   # Options: diagnostics, extract, train, inference, all
-FEATURE_TAG="seq_30_skip_2_stride_dyn"
-MODEL_TAG="bilstm_v1"
+TASK_ID="extract"                         # Options: diagnostics, extract, train, inference, all
+FEATURE_TAG="size8_seq30_skip2_stridedyn" # Options: size8_seq30_skip2_stridedyn, size10_seq30_skip2_stridedyn
+MODEL_TAG="v3"                     # Options: (v1 ->feat_size=10,batch=64; v2 -> feat_size=10,batch=16, v3 -> feat_size=8,batch=16)
 BATCH_SIZE=64
-LSTM_BATCH_SIZE=64
+LSTM_BATCH_SIZE=16
 
 # --- Pathing & File Naming ---
 PROJECT_NAME="project_work_cv"
@@ -70,12 +70,12 @@ sync_to_home() {
     cp "$SCRATCH_WORKSPACE/models/"*.pth "$HOME_PROJ_DIR/models/" 2>/dev/null || true
 
     # Export outputs (video, CSV, plot, log)
-    mkdir -p "$HOME_PROJ_DIR/outputs/run_${SLURM_JOB_ID}_${TASK_ID}"
-    cp -r "$SCRATCH_WORKSPACE/outputs/"* "$HOME_PROJ_DIR/outputs/run_${SLURM_JOB_ID}_${TASK_ID}/" 2>/dev/null || true
+    mkdir -p "$HOME_PROJ_DIR/outputs/run_${SLURM_JOB_ID}_${TASK_ID}_${FEATURE_TAG}"
+    cp -r "$SCRATCH_WORKSPACE/outputs/"* "$HOME_PROJ_DIR/outputs/run_${SLURM_JOB_ID}_${TASK_ID}_${FEATURE_TAG}/" 2>/dev/null || true
 
     # Export extracted features (zipped)
     if [[ "$TASK_ID" == "extract" || "$TASK_ID" == "all" ]]; then
-        hpc_log "Archiviazione Tensori PyTorch..."
+        hpc_log "Zipping and syncing extracted features..."
         cd "$SCRATCH_WORKSPACE" || exit
         if [ -d "$FEATURE_DIR_NAME" ]; then
             zip -rq "$HOME_PROJ_DIR/features/$FEATURE_ZIP_NAME" "$FEATURE_DIR_NAME/"
