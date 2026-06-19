@@ -1,4 +1,4 @@
- Fitness Action Recognition HPC Pipeline
+# Fitness Action Recognition HPC Pipeline
 
 A robust, end-to-end Deep Learning pipeline for temporal action recognition and kinematic tracking of fitness exercises. Designed to run on High-Performance Computing (HPC) clusters (e.g., SLURM), this project combines spatial pose estimation, signal processing, and recurrent neural networks to accurately classify exercises and count repetitions in real-time.
 
@@ -90,5 +90,5 @@ The model relies on a Hard-Voting aggregation logic at the video level during ev
 Special thanks to [Riccardo Riccio][link] for providing the open-source real-time exercise recognition dataset on Kaggle, which served as the foundational data for this project.
 
 [link]:https://www.kaggle.com/datasets/riccardoriccio/real-time-exercise-recognition-dataset
----
+
 *Developed for Computer Vision and Deep Learning academic research.*
