@@ -98,15 +98,15 @@ class Config:
 
     # --- DATASET AUGMENTATION HYPERPARAMETERS ---
     SYNTHETIC_IDENTIFIER = "_syn_"
-    SYNTHETIC_STRIDE = 20
-    SYNTHETIC_MAX_SEQ = 6
+    SYNTHETIC_STRIDE = 10
+    SYNTHETIC_MAX_SEQ = 10
     # Organic videos balancing
     # {class_idx: divisor}. No class in dict => divisor=1 (no boost)
     ORGANIC_STRIDE_DIVISORS = {1: 3, 2: 4}
     MAX_DROPOUT_RATIO = 0.20
 
     # --- TRAINING PARAMETERS ---
-    NUM_EPOCHS = 20
+    NUM_EPOCHS = 30
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-4
     SCHEDULER_PATIENCE = 2
@@ -118,7 +118,7 @@ class Config:
 
     # --- BILSTM HYPERPARAMETERS ---
     LSTM_BATCH_SIZE = 16
-    LSTM_INPUT_SIZE = 10
+    LSTM_INPUT_SIZE = 8
     LSTM_HIDDEN_SIZE = 32
     LSTM_NUM_LAYERS = 1
     LSTM_NUM_CLASSES = len(TARGET_CLASSES)
@@ -128,7 +128,7 @@ class Config:
     # --- NORMALIZATION STRATEGY ---
     # Indices 0-8 (Angles): Max 180.0
     # Index 9 (BBox Ratio): Estimated Max 3.0
-    FEATURE_SCALERS = [1.0 / 180.0] * 9 + [1.0 / 3.0]
+    # FEATURE_SCALERS = [1.0 / 180.0] * 9 + [1.0 / 3.0]
 
     # --- FSM CONSTANTS ---
     FPS = 30
@@ -359,7 +359,7 @@ class FitnessSequenceDataset(Dataset):
 
     def __init__(self, features_dir: str):
         super().__init__()
-        self.files = glob.glob(os.path.join(features_dir, "*.pt"))
+        self.files = sorted(glob.glob(os.path.join(features_dir, "*.pt")))
         if not self.files:
             logger.warning(
                 f"No .pt files found in {features_dir}. Feature extraction required."
@@ -377,21 +377,39 @@ class DataCoordinator:
 
     @staticmethod
     def group_split(dataset: FitnessSequenceDataset, train_ratio: float = 0.8):
-        video_groups = {}
+        class_video_groups = {}
+
         for idx, file_path in enumerate(dataset.files):
             filename = os.path.basename(file_path)
             video_id = filename.split("_seq")[0]
-            video_groups.setdefault(video_id, []).append(idx)
 
-        unique_video_ids = list(video_groups.keys())
-        random.shuffle(unique_video_ids)
+            if "_org_" in video_id:
+                class_prefix = f"{video_id.split('_org_')[0]}_org"
+            elif "_syn_" in video_id:
+                class_prefix = f"{video_id.split('_syn_')[0]}_syn"
+            else:
+                class_prefix = "unknown"
 
-        split_point = int(len(unique_video_ids) * train_ratio)
-        train_vids = unique_video_ids[:split_point]
-        val_vids = unique_video_ids[split_point:]
+            if class_prefix not in class_video_groups:
+                class_video_groups[class_prefix] = {}
 
-        train_indices = [idx for vid in train_vids for idx in video_groups[vid]]
-        val_indices = [idx for vid in val_vids for idx in video_groups[vid]]
+            class_video_groups[class_prefix].setdefault(video_id, []).append(idx)
+
+        train_indices = []
+        val_indices = []
+
+        for cls, video_groups in class_video_groups.items():
+            unique_video_ids = sorted(list(video_groups.keys()))
+            random.shuffle(unique_video_ids)
+
+            split_point = int(len(unique_video_ids) * train_ratio)
+            train_vids = unique_video_ids[:split_point]
+            val_vids = unique_video_ids[split_point:]
+
+            for vid in train_vids:
+                train_indices.extend(video_groups[vid])
+            for vid in val_vids:
+                val_indices.extend(video_groups[vid])
 
         return Subset(dataset, train_indices), Subset(dataset, val_indices)
 
@@ -538,9 +556,9 @@ class FitnessClassifier(nn.Module):
         super().__init__()
         logger.info(f"Initializing FitnessClassifier model on {config.DEVICE}...")
 
-        self.register_buffer(
-            "scale_mask", torch.tensor(config.FEATURE_SCALERS, dtype=torch.float32)
-        )
+        # self.register_buffer(
+        #    "scale_mask", torch.tensor(config.FEATURE_SCALERS, dtype=torch.float32)
+        # )
         lstm_dropout = config.LSTM_DROPOUT_RATE if config.LSTM_NUM_LAYERS > 1 else 0.0
         self.lstm = nn.LSTM(
             input_size=config.LSTM_INPUT_SIZE,
@@ -562,7 +580,8 @@ class FitnessClassifier(nn.Module):
 
     def forward(self, x):
         # Broadcasting: (Batch, Seq, Features) * (Features,) -> Scaled Tensor
-        x = x * self.scale_mask
+        # x = x * self.scale_mask
+        # x = x / 180.0  # Normalization for angles (0-180)
         _, (hn, _) = self.lstm(x)
 
         # hn shape: (num_layers * num_directions, batch, hidden_size)
@@ -579,7 +598,7 @@ class FitnessClassifier(nn.Module):
         Loads pre-trained weights into the model.
         """
         try:
-            state_dict = torch.load(filepath, map_location=device)
+            state_dict = torch.load(filepath, map_location=device, weights_only=True)
             self.load_state_dict(state_dict, strict=strict_match)
             self.to(device)
             self.weights_loaded = True

@@ -1,20 +1,20 @@
 #!/bin/bash
 #SBATCH --job-name=cv_pipeline
 #SBATCH --output=/hpc/home/%u/projects/project_work_cv/logs/%j_%x.log
-#SBATCH --partition=gpuResB     # gpuSlim, gpuResB
-#SBATCH --qos=gpuResB_qos
-#SBATCH --gres=gpu:1            # gpu:1g.22gb:1, gpu:1
+#SBATCH --partition=gpuSlim    # gpuSlim, gpuResB
+# --qos=gpuResB_qos
+#SBATCH --gres=gpu:1g.22gb:1            # gpu:1g.22gb:1, gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=01:00:00   # Walltime (Max: 1-00:00:00 su gpuSlim)
+#SBATCH --time=04:00:00   # Walltime (Max: 1-00:00:00 su gpuSlim)
 
 # ==========================================
 # 0. PIPELINE CONFIGURATION
 # ==========================================
 # --- Pipeline Hyperparameters ---
-TASK_ID="extract"                         # Options: diagnostics, extract, train, inference, all
-FEATURE_TAG="size8_seq30_skip2_stridedyn" # Options: size8_seq30_skip2_stridedyn, size10_seq30_skip2_stridedyn
-MODEL_TAG="v3"                     # Options: (v1 ->feat_size=10,batch=64; v2 -> feat_size=10,batch=16, v3 -> feat_size=8,batch=16)
+TASK_ID="inference"                         # Options: diagnostics, extract, train, inference, all
+FEATURE_TAG="size8_seq30_stridedyn"     # Options: size8_seq30_skip2_stridedyn, size10_seq30_skip2_stridedyn, size8_seq30_stridedyn
+MODEL_TAG="baseline"                            # Options: (v1 ->feat_size=10,batch=64; v2 -> feat_size=10,batch=16, v3 -> feat_size=8,batch=16,normalized)
 BATCH_SIZE=64
 LSTM_BATCH_SIZE=16
 
@@ -40,7 +40,7 @@ hpc_log() {
 # 1. ENVIRONMENT SETUP & SIGNAL HANDLING
 # ==========================================
 # Catch SIGTERM sent by SLURM on graceTime (15 minutes)
-trap 'hpc_log "RICEVUTO SIGTERM (Fine Tempo o Preemption). Avvio salvataggio di emergenza!"; emergency_sync; exit 143' SIGTERM
+trap 'hpc_log "SIGTERM RECEIVED (Walltime Reached or Preemption). Starting emergency sync..."; emergency_sync; exit 143' SIGTERM
 
 module purge
 module load cuda/12.2
