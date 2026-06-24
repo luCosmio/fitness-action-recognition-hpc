@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=cv_pipeline
 #SBATCH --output=/hpc/home/%u/projects/project_work_cv/logs/%j_%x.log
-#SBATCH --partition=gpuSlim    # gpuSlim, gpuResB
+#SBATCH --partition=gpu_H100_partitioned
 # --qos=gpuResB_qos
 #SBATCH --gres=gpu:1g.22gb:1            # gpu:1g.22gb:1, gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=04:00:00   # Walltime (Max: 1-00:00:00 su gpuSlim)
+#SBATCH --time=02:00:00   # Walltime (Max: 1-00:00:00 su gpuSlim)
 
 # ==========================================
 # 0. PIPELINE CONFIGURATION

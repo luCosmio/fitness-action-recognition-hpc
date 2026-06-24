@@ -124,7 +124,7 @@ class Config:
     LSTM_NUM_CLASSES = len(TARGET_CLASSES)
     LSTM_FC_HIDDEN_SIZE = 16
     LSTM_DROPOUT_RATE = 0.5
-    STREAM_CONFIDENCE_THRESHOLD = 0.7
+    STREAM_CONFIDENCE_THRESHOLD = 0.55
     # --- NORMALIZATION STRATEGY ---
     # Indices 0-8 (Angles): Max 180.0
     # Index 9 (BBox Ratio): Estimated Max 3.0
@@ -292,28 +292,28 @@ class PoseUtils:
             return [
                 PoseUtils.calculate_angle(
                     d["R_SHOULDER"], d["R_ELBOW"], d["R_WRIST"]
-                ),  # 0: Gomito Dx
+                ),  # 0: Right Elbow
                 PoseUtils.calculate_angle(
                     d["L_SHOULDER"], d["L_ELBOW"], d["L_WRIST"]
-                ),  # 1: Gomito Sx
+                ),  # 1: Left Elbow
                 PoseUtils.calculate_angle(
                     d["R_HIP"], d["R_SHOULDER"], d["R_ELBOW"]
-                ),  # 2: Spalla Dx
+                ),  # 2: Right Shoulder
                 PoseUtils.calculate_angle(
                     d["L_HIP"], d["L_SHOULDER"], d["L_ELBOW"]
-                ),  # 3: Spalla Sx
+                ),  # 3: Left Shoulder
                 PoseUtils.calculate_angle(
                     d["R_SHOULDER"], d["R_HIP"], d["R_KNEE"]
-                ),  # 4: Anca Dx
+                ),  # 4: Right Hip
                 PoseUtils.calculate_angle(
                     d["L_SHOULDER"], d["L_HIP"], d["L_KNEE"]
-                ),  # 5: Anca Sx
+                ),  # 5: Left Hip
                 PoseUtils.calculate_angle(
                     d["R_HIP"], d["R_KNEE"], d["R_ANKLE"]
-                ),  # 6: Ginocchio Dx
+                ),  # 6: Right Knee
                 PoseUtils.calculate_angle(
                     d["L_HIP"], d["L_KNEE"], d["L_ANKLE"]
-                ),  # 7: Ginocchio Sx
+                ),  # 7: Left Knee
             ]
 
         angles_filtered = _calc_angles(filtered)
@@ -1085,7 +1085,7 @@ class MetricsVisualizer:
         filename: str = "confusion_matrix.png",
     ):
         """Generates a styled confusion matrix using only matplotlib."""
-        cm = confusion_matrix(y_true, y_pred)
+        cm = confusion_matrix(y_true, y_pred, labels=range(len(classes)))
 
         fig, ax = plt.subplots(figsize=(8, 8))
         cax = ax.matshow(cm, cmap=plt.get_cmap("Blues"), alpha=0.8)
@@ -1128,7 +1128,13 @@ class MetricsVisualizer:
         filename: str = "class_report.txt",
     ):
         """Generates and saves the F1-Score/Precision/Recall report."""
-        report = classification_report(y_true, y_pred, target_names=classes)
+        report = classification_report(
+            y_true,
+            y_pred,
+            labels=range(len(classes)),
+            target_names=classes,
+            zero_division=0,
+        )
         filepath = os.path.join(self.output_dir, filename)
         with open(filepath, "w") as f:
             f.write(str(report))
